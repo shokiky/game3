@@ -1,1 +1,164 @@
-gametest2
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Mini Kart Racing</title>
+<style>
+  body{margin:0;background:#0b0f1a;color:#fff;font-family:sans-serif;text-align:center}
+  #ui{padding:10px}
+  button{margin:4px;padding:10px 16px;border-radius:12px;border:none;background:#1f6feb;color:#fff}
+  canvas{display:block;margin:0 auto;background:#87ceeb;border:3px solid #fff}
+</style>
+</head>
+<body>
+<div id="ui">
+  <h2>Mini Kart Racing</h2>
+  <button onclick="start(1)">1人 vs ボット</button>
+  <button onclick="start(2)">2人 + ボット</button>
+  <span id="info"></span>
+</div>
+<canvas id="c" width="500" height="600"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const W=c.width,H=c.height;
+
+let mode=1, running=false, t=0, speed=6, curve=0;
+let p1, p2, bots=[], items=[];
+let keys={};
+
+addEventListener('keydown',e=>keys[e.key]=1);
+addEventListener('keyup',e=>keys[e.key]=0);
+
+function start(m){
+  mode=m; running=true; t=0; speed=6; curve=0;
+  p1={x:0,y:0,off:0,color:'#ff4757',boost:0};
+  p2={x:0,y:0,off:0,color:'#1e90ff',boost:0};
+  bots = Array.from({length:5},(_,i)=>({z: i*200+200, off:(Math.random()*2-1)*0.6}));
+  items = Array.from({length:6},(_,i)=>({z:i*250+300, off:(Math.random()*2-1)*0.7, type: Math.random()<0.5?'boost':'slow'}));
+  loop();
+}
+
+function loop(){
+  if(!running) return;
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function update(){
+  t+=0.016;
+  // gentle curves
+  curve = Math.sin(t*0.6)*0.6 + Math.sin(t*0.17)*0.4;
+
+  const turn1 = (keys['ArrowLeft']?-1:0)+(keys['ArrowRight']?1:0);
+  const turn2 = (keys['a']?-1:0)+(keys['d']?1:0);
+
+  p1.off += turn1*0.04; p1.off *= 0.98;
+  if(mode===2){ p2.off += turn2*0.04; p2.off *= 0.98; }
+
+  // bounds
+  p1.off = Math.max(-1,Math.min(1,p1.off));
+  p2.off = Math.max(-1,Math.min(1,p2.off));
+
+  // speed & boost
+  if(keys['ArrowUp']) p1.boost = Math.min(60, p1.boost+1);
+  if(mode===2 && keys['w']) p2.boost = Math.min(60, p2.boost+1);
+  const s1 = speed + p1.boost*0.05;
+  const s2 = speed + p2.boost*0.05;
+  p1.boost *= 0.98; p2.boost *= 0.98;
+
+  // move world toward player
+  bots.forEach(b=>{ b.z -= s1; if(b.z<0){ b.z+=1200; b.off=(Math.random()*2-1)*0.7;} });
+  items.forEach(it=>{ it.z -= s1; if(it.z<0){ it.z+=1500; it.off=(Math.random()*2-1)*0.7; it.type=Math.random()<0.5?'boost':'slow'; } });
+
+  // collisions (simple)
+  bots.forEach(b=>{
+    if(Math.abs(b.z-60)<20 && Math.abs((p1.off-curve)-b.off)<0.2){ end('Player1 Crash'); }
+    if(mode===2 && Math.abs(b.z-60)<20 && Math.abs((p2.off-curve)-b.off)<0.2){ end('Player2 Crash'); }
+  });
+  items.forEach(it=>{
+    if(Math.abs(it.z-60)<20 && Math.abs((p1.off-curve)-it.off)<0.2){
+      if(it.type==='boost') p1.boost+=30; else speed=Math.max(4,speed-1);
+      it.z=9999;
+    }
+    if(mode===2 && Math.abs(it.z-60)<20 && Math.abs((p2.off-curve)-it.off)<0.2){
+      if(it.type==='boost') p2.boost+=30; else speed=Math.max(4,speed-1);
+      it.z=9999;
+    }
+  });
+
+  // slight speed ramp
+  speed = Math.min(12, speed+0.002);
+  document.getElementById('info').textContent = `Speed:${speed.toFixed(1)}`;
+}
+
+function end(msg){ running=false; setTimeout(()=>alert(msg),10); }
+
+function proj(z, off){
+  const scale = 1/(z*0.002+0.2);
+  const x = W/2 + (off + curve*(1-z/1200))*300*scale;
+  const y = H - (z*0.6);
+  return {x,y,scale};
+}
+
+function drawRoad(){
+  ctx.fillStyle = '#87ceeb'; ctx.fillRect(0,0,W,H);
+  // ground
+  ctx.fillStyle = '#2f8f2f'; ctx.fillRect(0,H*0.5,W,H*0.5);
+  // road stripes via segments
+  for(let z=0; z<1200; z+=20){
+    const p = proj(z,0);
+    const w = 220*p.scale;
+    ctx.fillStyle = (Math.floor(z/40)%2)?'#555':'#666';
+    ctx.fillRect(p.x-w/2, p.y, w, 22*p.scale);
+    // center line
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(p.x-2*p.scale, p.y, 4*p.scale, 22*p.scale);
+  }
+}
+
+function drawKart(off, color){
+  const p = proj(60, off);
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.scale(p.scale*1.2, p.scale*1.2);
+  ctx.fillStyle=color;
+  ctx.fillRect(-10,-20,20,40);
+  ctx.fillStyle='#000'; ctx.fillRect(-10,10,20,6);
+  ctx.restore();
+}
+
+function draw(){
+  drawRoad();
+
+  // bots
+  bots.forEach(b=>{
+    const p = proj(b.z, b.off);
+    ctx.save();
+    ctx.translate(p.x,p.y);
+    ctx.scale(p.scale,p.scale);
+    ctx.fillStyle='#ffd43b';
+    ctx.fillRect(-10,-20,20,40);
+    ctx.restore();
+  });
+
+  // items
+  items.forEach(it=>{
+    const p = proj(it.z, it.off);
+    ctx.save();
+    ctx.translate(p.x,p.y);
+    ctx.scale(p.scale,p.scale);
+    ctx.fillStyle = it.type==='boost' ? '#00ffa6' : '#ff9f1a';
+    ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+
+  // players
+  drawKart(p1.off-curve, p1.color);
+  if(mode===2) drawKart(p2.off-curve, p2.color);
+}
+</script>
+</body>
+</html>
+
